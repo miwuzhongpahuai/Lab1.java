@@ -1,5 +1,8 @@
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 
 public class Lab1 {
@@ -67,6 +70,7 @@ public class Lab1 {
             }
         }
     }
+
     // 根据桥接词生成新文本
     static String generateNewText(Graph graph, String inputText) {
         if (inputText == null || inputText.trim().isEmpty()) {
@@ -80,7 +84,7 @@ public class Lab1 {
 
         for (int i = 0; i < words.length - 1; i++) {
             newText.append(words[i]).append(" ");
-            String result = queryBridgeWords(graph, words[i], words[i+1]);
+            String result = queryBridgeWords(graph, words[i], words[i + 1]);
 
             if (result.startsWith("The bridge words")) {
                 // Extract bridge words from result and randomly select one
@@ -95,6 +99,7 @@ public class Lab1 {
         System.out.println("Bridge words used: " + bridgeWordsList);
         return newText.toString();
     }
+
     static String getRandomBridgeWord(Set<String> bridgeWords, Random random) {
         List<String> bridgeWordsList = new ArrayList<>(bridgeWords);
         return bridgeWordsList.get(random.nextInt(bridgeWordsList.size()));
@@ -102,97 +107,199 @@ public class Lab1 {
 
 
     // 计算两个单词之间的最短路径 (Dijkstra 算法)
-    static String calcShortestPath(Graph graph, String word1, String word2) {
-        Map<String, Integer> distances = new HashMap<>();
-        Map<String, String> previous = new HashMap<>();
+    static List<String> calcShortestPaths(Lab1.Graph graph, String word1, String word2) {
+        Map<String, Set<String>> previous = new HashMap<>();
         Set<String> visited = new HashSet<>();
-        PriorityQueue<String> queue = new PriorityQueue<>(Comparator.comparingInt(distances::get));
+        Queue<String> queue = new LinkedList<>();
+        List<String> paths = new ArrayList<>();
 
-        // 初始化所有 "word1" 节点的距离
         int word1Index = 0;
         for (String node : graph.adjList.keySet()) {
             if (node.startsWith(word1)) {
-                distances.put(node + word1Index, 0);
                 queue.offer(node + word1Index);
+                previous.computeIfAbsent(node + word1Index, k -> new HashSet<>()).add("");
                 word1Index++;
-            } else {
-                distances.put(node, Integer.MAX_VALUE);
             }
         }
+
         if (word1Index == 0) {
-            return "No \"" + word1 + "\" in the graph!";
+            System.out.println("No \"" + word1 + "\" in the graph!");
+            return paths;
         }
 
         while (!queue.isEmpty()) {
             String current = queue.poll();
             String currentWord = current.replaceAll("\\d", "");
-
-            if (currentWord.equals(word2)) {
-                return buildPath(previous, current)
-                        .replaceAll("\\d", ""); // 去除数字
-            }
-
             visited.add(current);
 
-            Map<String, Integer> currentWeights = graph.weights.get(currentWord);
-            if (currentWeights != null) {
-                for (String neighbor : graph.adjList.get(currentWord)) {
-                    if (!visited.contains(neighbor)) {
-                        Integer weight = currentWeights.get(neighbor);
-                        if (weight != null) {
-                            int distance = distances.get(current) + weight;
-                            if (distance < distances.getOrDefault(neighbor, Integer.MAX_VALUE)) {
-                                distances.put(neighbor, distance);
-                                previous.put(neighbor, current);
-                                queue.offer(neighbor);
-                            }
+            if (currentWord.equals(word2)) {
+                paths.addAll(buildPaths(previous, current).stream()
+                        .map(s -> s.replaceAll("\\d", ""))
+                        .collect(Collectors.toList()));
+            } else {
+                Map<String, Integer> currentWeights = graph.weights.get(currentWord);
+                if (currentWeights != null) {
+                    for (String neighbor : graph.adjList.get(currentWord)) {
+                        String neighborWithIndex = neighbor + "0"; // 默认索引为0
+                        if (!visited.contains(neighborWithIndex)) {
+                            queue.offer(neighborWithIndex);
+                            previous.computeIfAbsent(neighborWithIndex, k -> new HashSet<>()).add(current);
+                            visited.add(neighborWithIndex); // 添加到visited，避免重复访问
                         }
                     }
                 }
             }
         }
 
-        return "No path from \"" + word1 + "\" to \"" + word2 + "\"!";
+        if (paths.isEmpty()) {
+            System.out.println("No path from \"" + word1 + "\" to \"" + word2 + "\"!\"");
+        }
+        return paths;
     }
 
-    private static String buildPath(Map<String, String> previous, String destination) {
-        List<String> path = new ArrayList<>();
-        String current = destination;
-        while (current != null) {
-            path.add(0, current);
-            current = previous.get(current);
+    static Set<String> buildPaths(Map<String, Set<String>> previous, String current) {
+        Set<String> paths = new HashSet<>();
+        if (previous.get(current).contains("")) { // 到达了起始节点
+            paths.add(current);
+        } else {
+            for (String prev : previous.get(current)) {
+                for (String path : buildPaths(previous, prev)) {
+                    paths.add(path + " " + current);
+                }
+            }
         }
-        return String.join(" --> ", path);
+        return paths;
+    }
+
+    static void findAllPaths(Lab1.Graph graph, String current, String endWord, List<String> path, Set<String> visited, List<List<String>> allPaths) {
+        visited.add(current);
+        path.add(current);
+
+        if (current.equals(endWord)) {
+            allPaths.add(new ArrayList<>(path));
+        } else {
+            for (String neighbor : graph.adjList.getOrDefault(current, new HashSet<>())) {
+                if (!visited.contains(neighbor)) {
+                    findAllPaths(graph, neighbor, endWord, path, visited, allPaths);
+                }
+            }
+        }
+        path.remove(path.size() - 1);
+        visited.remove(current);
+    }
+
+    static int getPathLength(List<String> path, Lab1.Graph graph) {
+        int length = 0;
+        for (int i = 0; i < path.size() - 1; i++) {
+            String from = path.get(i);
+            String to = path.get(i + 1);
+            length += graph.weights.getOrDefault(from, new HashMap<>()).getOrDefault(to, 0);
+        }
+        return length;
+    }
+
+    static List<String> calcAllPaths(Lab1.Graph graph, String word1, String word2) {
+        List<List<String>> allPaths = new ArrayList<>();
+        Set<String> visited = new HashSet<>();
+        List<String> path = new ArrayList<>();
+
+        for (String startNode : graph.adjList.keySet()) {
+            if (startNode.startsWith(word1)) {
+                findAllPaths(graph, startNode, word2, path, visited, allPaths);
+            }
+        }
+
+        if (allPaths.isEmpty()) {
+            System.out.println("No path from \"" + word1 + "\" to \"" + word2 + "\"!\"");
+            return Collections.emptyList();
+        }
+
+        int shortestPathLength = allPaths.stream()
+                .mapToInt(p -> getPathLength(p, graph))
+                .min().orElse(-1);
+
+        for (List<String> p : allPaths) {
+            String pathString = String.join(" ", p);
+            if (getPathLength(p, graph) == shortestPathLength) {
+                System.out.println(">>> " + pathString + " <<< (shortest)");
+            } else {
+                System.out.println(pathString);
+            }
+        }
+
+        return allPaths.stream()
+                .map(p -> String.join(" ", p))
+                .collect(Collectors.toList());
     }
 
     // 随机游走
+
     static String randomWalk(Graph graph) throws IOException {
         List<String> visitedNodes = new ArrayList<>();
-        List<String> visitedEdges = new ArrayList<>();
-        String current = new ArrayList<>(graph.adjList.keySet()).get(new Random().nextInt(graph.adjList.size()));
-        visitedNodes.add(current);
-        while (graph.adjList.containsKey(current)) {
-            List<String> neighbors = new ArrayList<>(graph.adjList.get(current));
-            if (neighbors.isEmpty()) {
-                break;
+        Set<String> visitedWords = new HashSet<>(); // 使用 Set 存储 visitedWords
+        AtomicReference<String> current = new AtomicReference<>(new ArrayList<>(graph.adjList.keySet()).get(new Random().nextInt(graph.adjList.size())));
+        visitedNodes.add(current.get());
+        visitedWords.add(current.get().toLowerCase()); // 将第一个单词转换为小写存储
+
+        System.out.println("Random walk started. Press Enter to stop...");
+        System.out.println(current.get());
+
+        Thread walkThread = new Thread(() -> {
+            while (true) {
+                List<String> neighbors = new ArrayList<>(graph.adjList.getOrDefault(current.get(), new HashSet<>()));
+
+                if (neighbors.isEmpty()) {
+                    System.out.println("Reached a node with no outgoing edges. Stopping...");
+                    return;
+                }
+
+                String next = neighbors.get(new Random().nextInt(neighbors.size()));
+                String edge = current.get() + " --> " + next;
+
+                // 将下一个单词转换为小写进行比较
+                if (!visitedWords.add(next.toLowerCase())) {
+                    System.out.println("Repeated word detected: " + next + ". Stopping...");
+                    return;
+                }
+
+                visitedNodes.add(next);
+                visitedWords.add(next.toLowerCase()); // 将访问过的单词转换为小写存储
+                current.set(next);
+                System.out.println(current.get());
+
+                try {
+                    TimeUnit.SECONDS.sleep(1);
+                } catch (InterruptedException e) {
+                    return;
+                }
             }
-            String next = neighbors.get(new Random().nextInt(neighbors.size()));
-            String edge = current + " --> " + next;
-            if (visitedEdges.contains(edge)) {
-                break;
-            }
-            visitedEdges.add(edge);
-            visitedNodes.add(next);
-            current = next;
+        });
+
+        walkThread.start();
+
+        new Scanner(System.in).nextLine();
+
+        walkThread.interrupt();
+
+        try {
+            walkThread.join();
+        } catch (InterruptedException e) {
+            System.err.println("线程中断: " + e.getMessage());
+            return "";
         }
+
         String output = String.join(" ", visitedNodes);
         BufferedWriter writer = new BufferedWriter(new FileWriter("random_walk.txt"));
         writer.write(output);
         writer.close();
+        System.out.println("\nRandom walk stopped.");
+        System.out.println("Visited nodes: " + output);
+
         return output;
     }
 
-    // 主程序入口
+
+
     public static void main(String[] args) throws IOException {
         Scanner scanner = new Scanner(System.in);
         System.out.print("Enter the path to the text file: ");
@@ -233,10 +340,22 @@ public class Lab1 {
                     word1 = scanner.nextLine().toLowerCase();
                     System.out.print("Enter the second word: ");
                     word2 = scanner.nextLine().toLowerCase();
-                    System.out.println(calcShortestPath(graph, word1, word2));
+                    List<String> shortestPaths = calcShortestPaths(graph, word1, word2);
+                    if (!shortestPaths.isEmpty()) {
+                        System.out.println("Shortest paths from \"" + word1 + "\" to \"" + word2 + "\":");
+                        for (String path : shortestPaths) {
+                            System.out.println(path);
+                        }
+                    }
+                    System.out.println("all paths are :");
+                    calcAllPaths(graph, word1, word2);
                     break;
                 case 5:
-                    System.out.println("Random walk result: " + randomWalk(graph));
+                    try {
+                        System.out.println("Random walk result: " + randomWalk(graph));
+                    } catch (IOException e) {
+                        System.err.println("随机游走过程中出现错误: " + e.getMessage());
+                    }
                     break;
                 case 0:
                     System.out.println("Exiting...");
@@ -247,4 +366,5 @@ public class Lab1 {
             }
         }
     }
+
 }
